@@ -16,18 +16,18 @@
 ```
 qa-interview-questions/
 ├── README.md
-├── python/               # Python 编程题
-├── api-automation/       # 接口自动化面试题
-├── ui-automation/        # UI 自动化面试题
-├── test-theory/          # 测试理论 & 场景题
+├── test-theory/          # 测试理论 & 场景题（流程/策略/用例/沟通/复盘）
+├── api-automation/       # 接口自动化 + Pytest + Python 面试题
+├── ui-automation/        # UI 自动化（Selenium/POM/XPath）
 ├── ai-testing/           # AI 测试面试题
-├── cicd-tools/           # CI/CD & 工具链
-└── system-design/        # 测试架构设计题
+├── database/             # SQL 面试题
+├── linux/                # Linux/日志排查/Docker/Git
+└── performance/          # 性能测试（JMeter）
 ```
 
 ## 🤝 协作方式
 
-龙哥出题 → AI 写答案 → 龙哥审核补充 → 定稿入库
+面试题 → 结合个人过往经历回答 → AI 润色改正不足 → 个人审核 → 定稿入库
 
 ---
 *持续更新中*
