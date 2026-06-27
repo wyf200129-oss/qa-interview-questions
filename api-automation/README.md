@@ -6322,3 +6322,121 @@ os.environ.get("PYTEST_XDIST_WORKER")
 
 **关键词**：接口测试流程 / 六阶段模型 / 用例四维度 / 数据一致性 / 分层架构 / 前置数据管理 / Jenkins持续集成
 
+
+---
+
+## Q42. 接口请求的Token是否加密？Base64和加密有什么区别？
+
+### 问题描述
+
+面试官问"你们的Token加密了吗"，乍看是技术细节题，其实是**分层理解题**——要区分传输加密、编码签名、数据加密三个不同层面的概念。80%的人会混淆Base64编码和加密。
+
+> 这道题被问到的概率很高，因为Token是接口测试最基础的组件，答不透说明你对底层机制理解不够。
+
+---
+
+### 一、核心结论（先说结论）
+
+| 层面 | Token是否加密 | 说明 |
+|:---|:---:|:---|
+| Token本身 | ❌ 通常不加密 | Token就是一个凭证字符串，内容是明文或Base64编码 |
+| 传输过程 | ✅ HTTPS/TLS加密 | 整个HTTP通信被TLS加密，抓包看到的是密文 |
+| JWT Signature | ✅ 有签名 | 签名用来防篡改，不是用来隐藏内容的 |
+| 敏感数据 | ❌ 不应存在Token里 | Payload用Base64编码，任何人都能解码，不能放密码/手机号 |
+
+---
+
+### 二、面试回答脚本（约1.5分钟）
+
+> "Token本身通常是不加密的——它就是一个凭证字符串。真正的安全分两层来理解：
+>
+> **第一层是传输加密**：Token在HTTP请求里一般放在Header中，通过HTTPS/TLS对整个通信链路加密。别人抓包看到的是加密后的密文，解不开Token内容。所以不是Token自己加密了，是传输管道加密了。
+>
+> **第二层是Token的编码和签名**：以JWT为例，它由三段组成——Header、Payload、Signature。Payload部分是Base64编码，**编码不是加密**，任何人都能解码看到里面的内容。所以JWT的Payload里绝不能放敏感信息（密码、手机号等），只能放用户ID、角色、过期时间这些。Signature是HMAC或RSA签名，用来防篡改，不是用来隐藏内容的。
+>
+> **那什么情况下Token需要额外加密？** 如果业务要求Payload里必须存敏感数据（比如一些合规场景），会用JWE规范对Payload做真正的AES加密，但这是少数情况。大多数系统的做法是把敏感数据放服务端Session或数据库里，Token里只存一个ID做索引。"
+
+---
+
+### 三、Base64编码 vs 加密（核心区分）
+
+| 对比维度 | Base64编码（Encode） | 加密（Encrypt） |
+|:---|:---|:---|
+| 英文关键词 | `encode` / `decode` | `encrypt` / `decrypt` |
+| 是否需要密钥 | ❌ 不需要，公开算法 | ✅ 需要密钥 |
+| 能否还原 | ✅ 任何人都能解码 | ❌ 没有密钥解不开 |
+| 目的 | 解决二进制在文本协议中的传输问题 | 保护数据机密性 |
+| 举例 | JWT的Payload部分 | HTTPS的TLS加密 |
+
+**一个例子说清楚**：
+```
+原始内容：{"userId": "12345"}
+↓ Base64编码
+eyJ1c2VySWQiOiAiMTIzNDUifQ==  ← 复制到 jwt.io 直接解码，不需要密码
+
+↓ AES加密（需要密钥）
+a8f5b3c1d2e4...  ← 没有密钥完全解不开
+```
+
+---
+
+### 四、JWT三段的含义
+
+```
+eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiIxMjM0NSJ9.abc123def456...
+
+  Header          Payload          Signature
+  (算法类型)       (数据-Base64)     (签名-HMAC SHA256)
+```
+
+| 部分 | 格式 | 是否加密 | 作用 |
+|:---|:---|:---:|:---|
+| Header | Base64编码 | ❌ | 声明签名算法（HS256/RS256） |
+| Payload | Base64编码 | ❌ | 存放Claims（用户ID、过期时间、角色） |
+| Signature | HMAC/RSA签名 | 签名≠加密 | 防篡改——改了Payload算不出相同签名 |
+
+> ⚠️ **关键坑**：Payload是Base64编码，任何人拿到JWT都能在 jwt.io 上解码看到Payload内容。所以**密码、身份证号、银行卡号绝不能放在JWT的Payload里**！
+
+---
+
+### 五、Token安全的三个支柱
+
+| 措施 | 具体做法 | 防止什么 |
+|:---|:---|:---|
+| **HTTPS传输** | 全站HTTPS，强制TLS 1.2+ | 中间人窃听Token |
+| **Payload不含敏感数据** | Token里只存userId+exp，不存密码/手机号 | Token泄露后信息暴露最小化 |
+| **短期有效 + 刷新机制** | Access Token 30分钟，Refresh Token 7天 | 泄露后攻击窗口有限 |
+
+---
+
+### 六、面试官可能的追问
+
+| 追问 | 应答要点 |
+|:---|:---|
+| "你说JWT的Payload能解码，那我怎么保证Token安全？" | 安全靠三件事：①传输层用HTTPS防中间人窃听 ②Payload不用Base64存敏感信息 ③Token设置合理的过期时间，比如30分钟 |
+| "Access Token和Refresh Token有什么区别？" | Access Token短期有效（30分钟），放请求里访问接口；Refresh Token长期有效（7天），只用来换新Access Token |
+| "Token在客户端怎么存？有什么安全问题？" | Web端存HttpOnly Cookie最安全，localStorage有XSS风险；移动端存Keychain/KeyStore等系统安全存储 |
+| "你们的Token用的是什么形式？有过期时间吗？" | JWT格式的Bearer Token，有过期时间。自动化测试里用fixture管理，定时刷新。之前遇到过一个坑——并发跑时多条用例同时刷新Token冲突，改成session级别fixture解决 |
+| "JWE是什么？和JWT什么关系？" | JWE（JSON Web Encryption）是JWT的加密版——Payload真正用AES加密，解不开看不到内容。用于合规要求较高的场景，性能开销比JWT大 |
+
+---
+
+### 七、加分 & 减分对照
+
+| ⭐ 加分说法 | 为什么加分 |
+|:---|:---|
+| "Base64是编码不是加密，任何人都能解码" | 概念清晰，大多数人会混淆 |
+| "Payload不能放敏感信息，加密靠HTTPS传输层" | 理解分层安全模型 |
+| "JWT的Signature是签名，防篡改不是加密" | 区分签名和加密 |
+| "遇到过并发刷新Token的冲突问题" | 有真实经验 |
+
+| ❌ 减分说法 | 为什么减分 |
+|:---|:---|
+| "Token是加密的" / "Base64就是加密" | 概念混淆，基础不扎实 |
+| "Token放在URL参数里传" | 有安全风险——URL会被浏览器历史和服务端日志记录 |
+| 完全回避这个问题 | 不敢答=完全不懂 |
+
+---
+
+**关键词**：Token加密 / Base64 / JWT / HTTPS / 传输层安全 / Payload / 签名验证 / Access Token / Refresh Token
+
