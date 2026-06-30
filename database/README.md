@@ -476,3 +476,168 @@ ORDER BY month DESC, w.name;
 
 **关键词**：多表查询 / INNER JOIN / LEFT JOIN / 自关联 / 三级联查 / 数据一致性 / 库存调拨 / 报表聚合
 
+
+---
+
+## Q3. 你在ERP测试中平时都写哪些SQL？结合具体业务举例
+
+### 问题描述
+
+简历写了"熟悉MySQL"，面试官不会让你背语法，而是问"你实际项目中用SQL做什么"。这道题的关键是——能说出**测试场景 + 为什么这样查 + 怎么判断结果对错**。
+
+---
+
+### 一、五大类SQL使用场景
+
+| 场景类型 | 目的 | 频率 |
+|:---|:---|:---|
+| 数据一致性验证 | 接口返回成功 → 查数据库确认真的变了 | ⭐⭐⭐⭐⭐ |
+| Bug源头追溯 | 数据不对 → 多表联查定位哪个环节出错 | ⭐⭐⭐⭐ |
+| 幂等性/重复检查 | 接口跑了两次 → 有没有重复数据 | ⭐⭐⭐ |
+| 报表对账 | 自己算一遍 → 和系统报表对比 | ⭐⭐⭐ |
+| 异常监控 | 状态卡住、库存告急、盘点差异排查 | ⭐⭐ |
+
+---
+
+### 二、具体场景 + SQL
+
+#### 场景一：数据一致性验证
+
+**背景**：销售出库接口返回成功，但要确认库存真的扣了。
+
+```sql
+-- 查指定商品在指定仓库的库存变化
+SELECT p.name, i.stock_qty, i.last_out_date
+FROM inventory i
+INNER JOIN product p ON i.product_id = p.id
+WHERE i.product_id = 1 AND i.warehouse_id = 1;
+```
+
+**验证逻辑**：出库前记录 `stock_qty`，出库后再次查询，差值应该等于出库数量。如果差值不对——可能是并发问题导致库存扣了两次。
+
+---
+
+#### 场景二：数据追溯——出问题查源头
+
+**背景**：库存数量对不上，需要从出库单追溯到源头订单。
+
+```sql
+-- 从出库 → 销售订单 → 客户（三级联查）
+SELECT so.out_no, so.out_date, so.quantity,
+       sal.order_no, sal.order_date,
+       c.name AS customer
+FROM sale_out so
+LEFT JOIN sale_order sal ON so.order_id = sal.id
+LEFT JOIN customer c ON sal.customer_id = c.id
+WHERE so.out_no = 'SOUT-20260515-001';
+```
+
+**为什么用 LEFT JOIN**：不是每张出库单都有源订单——盘点出库、样品出库就没有对应的销售订单。用 INNER JOIN 会漏掉这类数据。
+
+---
+
+#### 场景三：采购入库追溯
+
+**背景**：入库数量异常，要追溯到请购环节看是哪里填错了。
+
+```sql
+-- 入库 → 采购订单 → 请购单
+SELECT pi.in_no, pi.quantity, pi.in_date,
+       po.order_no, po.order_date,
+       pr.request_no, pr.requester_id
+FROM purchase_in pi
+LEFT JOIN purchase_order po ON pi.order_id = po.id
+LEFT JOIN purchase_request pr ON po.request_id = pr.id
+WHERE pi.in_no = 'PIN-20260513-001';
+```
+
+---
+
+#### 场景四：幂等性检查——防止重复数据
+
+**背景**：接口跑了两次，有没有生成重复的出库单？
+
+```sql
+-- 同一张销售订单是否关联了多张出库单
+SELECT order_id, COUNT(*) AS cnt
+FROM sale_out
+GROUP BY order_id
+HAVING COUNT(*) > 1;
+
+-- 同一张请购单是否转了多张采购订单
+SELECT request_id, COUNT(*) AS cnt
+FROM purchase_order
+GROUP BY request_id
+HAVING COUNT(*) > 1;
+```
+
+**验证标准**：`COUNT(*) > 1` 返回空 = 幂等正常；返回了数据 = 有重复，需要查是接口幂等逻辑有Bug还是并发竞态问题。
+
+---
+
+#### 场景五：报表对账
+
+**背景**：系统生成的月度出入库汇总报表，你要自己写SQL验证数据准确性。
+
+```sql
+-- 按月统计各仓库出库量
+SELECT DATE_FORMAT(out_date, '%Y-%m') AS month,
+       warehouse_id, SUM(quantity) AS total_out
+FROM sale_out
+WHERE out_type = '销售出库'
+GROUP BY month, warehouse_id;
+
+-- 供应商采购金额排名
+SELECT s.name, SUM(po.total_amount) AS total_amount
+FROM purchase_order po
+INNER JOIN supplier s ON po.supplier_id = s.id
+WHERE po.status IN ('已入库', '已审核')
+GROUP BY s.name
+ORDER BY total_amount DESC
+LIMIT 5;
+```
+
+**对比方法**：系统报表的数字和手动SQL结果逐行对比，不一致就提Bug。
+
+---
+
+#### 场景六：异常数据排查
+
+```sql
+-- 待审核超过7天的订单（可能漏审核）
+SELECT order_no, status, order_date,
+       DATEDIFF(NOW(), order_date) AS wait_days
+FROM sale_order
+WHERE status = '待审核' AND DATEDIFF(NOW(), order_date) > 7;
+
+-- 出库数量大于订单数量的异常数据
+SELECT so.out_no, so.quantity AS out_qty, sal.quantity AS order_qty
+FROM sale_out so
+INNER JOIN sale_order sal ON so.order_id = sal.id
+WHERE so.quantity > sal.quantity;
+
+-- 盘点差异超过5件的商品
+SELECT p.name, w.name AS warehouse,
+       sc.book_qty, sc.actual_qty, sc.diff_qty, sc.reason
+FROM stock_check sc
+INNER JOIN product p ON sc.product_id = p.id
+INNER JOIN warehouse w ON sc.warehouse_id = w.id
+WHERE ABS(sc.diff_qty) > 5 AND sc.status = '已确认';
+```
+
+---
+
+### 三、面试回答模板（约1分钟）
+
+> "我写SQL主要是两个高频场景。
+>
+> **第一是数据一致性验证**——接口返回成功之后，我会查数据库确认数据真的变了。比如销售出库后查inventory表确认库存扣减正确，采购入库后查purchase_in表确认入库记录正确落库。
+>
+> **第二是Bug排查**——出问题后写多表联查定位源头。出库数量不对，我从出库单LEFT JOIN销售订单再LEFT JOIN客户，看是哪个环节数据变了。入库数量异常，从入库追溯到采购订单再到请购单。
+>
+> 其他还有——用GROUP BY HAVING COUNT(*) > 1 查重复数据验证幂等性；报表功能自己写聚合SQL和系统结果对账；查待审核超期、盘点差异、安全库存告急这些异常数据。"
+
+---
+
+**关键词**：数据一致性 / LEFT JOIN追溯 / 幂等性GROUP BY / 报表聚合对账 / 异常排查
+
